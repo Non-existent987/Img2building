@@ -53,16 +53,36 @@ onMounted(() => {
 
       // 再次强制刷新地图尺寸，这是最关键的修复
       map.invalidateSize();
-      // 添加地图点击获取经纬度
+      // ----添加地图点击获取经纬度-开始
       map.on('click', function(e) {
-        const lat = e.latlng.lat.toFixed(6);
-        const lng = e.latlng.lng.toFixed(6);
+        const lat = e.latlng.lat.toFixed(8);
+        const lng = e.latlng.lng.toFixed(8);
         L.popup()
         .setLatLng(e.latlng) // 设置弹出框位置
         .setContent(`经度：${lng}<br>纬度：${lat}`) // 设置弹出框内容
         .openOn(map);// 打开弹出框
 
-      });// 添加地图点击获取经纬度-结束
+        requestImageDownload(lng, lat);
+
+      });// ----添加地图点击获取经纬度-结束
+
+      // map.on('click',...) 函数外部，添加一个新的辅助函数 ---
+      const requestImageDownload = async (lng, lat) => {
+        try {
+          console.log("请求图片下载，坐标：", lng, lat);
+          // 这里可以添加实际的请求逻辑，例如调用后端API
+          const response = await axios.post('http://localhost:8000/download_image/', {
+            lng: lng,
+            lat: lat
+            
+          });
+          console.log('后端响应', response.data);
+          alert('后端已开始下载图片！');
+        } catch (error) {
+          console.error('请求图片下载失败：', error);
+          alert('请求图片下载失败，请检查控制台错误信息。');
+        }
+      };
 
     } else {
       console.error('Leaflet (L) or map container not found!');
