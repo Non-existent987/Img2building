@@ -1,0 +1,72 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+dist/
+dist-ssr/
+build/
+*.local
+
+# 模型权重：单文件超 GitHub 100MB 硬限制，且不适合入库
+# 权重请通过 ModelScope / HuggingFace 获取，见 README「获取模型」一节
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.safetensors
+*.h5
+*.pb
+
+# 数据集与中间产物
+datasets/
+data/
+*.csv
+*.tif
+*.tiff
+*.shp
+*.dbf
+*.shx
+*.prj
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 环境变量与密钥
+.env
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 日志
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 临时文件
+*.tmp
+*.temp
+Thumbs.db
+
+# 本地工具数据
+.workbuddy/
