@@ -1,110 +1,153 @@
 // src/composables/useMap.ts
-// 这是一个Vue 3组合式函数(Composable)，用于封装地图相关的逻辑
-// 组合式函数是Vue 3中将相关功能逻辑组织在一起的最佳实践
-
-// 从Vue库导入onMounted生命周期钩子
-// onMounted: 在组件挂载到DOM后执行，此时可以安全地访问DOM元素
-// 这是关键：必须在DOM元素渲染后才能初始化地图
-import { onMounted } from 'vue';
-
-// 导入Leaflet库，这是一个用于交互式地图的JavaScript库
-// L是Leaflet库的默认导出对象，包含所有Leaflet功能
+// 封装地图交互逻辑：底图切换、框选绘制、识别结果渲染
+import { onMounted, ref, shallowRef } from 'vue';
 import * as L from 'leaflet';
-
-// 导入Leaflet的CSS样式文件
-// 这是必需的，因为Leaflet的地图需要特定的样式才能正确显示
 import 'leaflet/dist/leaflet.css';
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconRetina from 'leaflet/dist/images/marker-icon-2x.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
-// 导入Leaflet的默认图标资源文件
-// 这是为了解决构建后图标路径问题
-// 在构建过程中，静态资源路径可能会改变，需要显式导入
-import icon from 'leaflet/dist/images/marker-icon.png';        // 普通分辨率图标
-import iconRetina from 'leaflet/dist/images/marker-icon-2x.png'; // 高分辨率图标
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';   // 图标阴影
-
-// 修复Leaflet图标路径问题的关键代码
-// 问题说明：Leaflet默认使用相对路径加载图标，但在构建后这些路径可能失效
-// 解决方案：手动设置图标路径
-// 1. 删除_getIconUrl方法以避免默认路径干扰
-// (L.Icon.Default.prototype as any) 将类型转换为any以避免TypeScript类型检查错误
 delete (L.Icon.Default.prototype as any)._getIconUrl;
-
-// 2. 使用mergeOptions方法重新设置图标路径
 L.Icon.Default.mergeOptions({
-  // iconRetinaUrl: 高分辨率设备的图标路径
   iconRetinaUrl: iconRetina,
-  // iconUrl: 普通设备的图标路径
   iconUrl: icon,
-  // shadowUrl: 图标的阴影路径
   shadowUrl: iconShadow,
 });
 
-/**
- * 自定义组合式函数useMap
- * 
- * 组合式函数(Composable)是Vue 3 Composition API的最佳实践
- * 优点：
- * - 逻辑复用：可以在多个组件中使用相同的功能
- * - 代码组织：将相关功能组织在一起
- * - 类型安全：提供更好的TypeScript支持
- * 
- * @param mapId - 地图容器的DOM元素ID（必须与模板中div的id一致）
- * @param center - 地图中心点坐标，默认为北京坐标 [纬度, 经度]
- * @param zoom - 地图缩放级别，默认为10
- * @returns 包含地图实例的对象
- */
-export function useMap(mapId: string, center: [number, number] = [39.9042, 116.4074], zoom: number = 18) {
-  // 声明一个变量来存储地图实例，初始值为null
-  // L.Map | null: TypeScript类型注解，表示变量可以是L.Map类型或null
-  let map: L.Map | null = null;
+const BASEMAPS = {
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles © Esri',
+  },
+  street: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors',
+  },
+};
 
-  // 在组件挂载后执行地图初始化
-  // 这是关键：必须在DOM元素渲染后才能初始化地图
-  // onMounted钩子确保在DOM元素存在后执行地图初始化代码
+export function useMap(
+  mapId: string,
+  center: [number, number] = [30.5853, 114.29],
+  zoom: number = 18,
+) {
+  const map = shallowRef<L.Map | null>(null);
+  const basemap = ref<keyof typeof BASEMAPS>('satellite');
+  const mode = ref<'point' | 'box'>('point');
+
+  // 各图层引用
+  let tileLayer: L.TileLayer | null = null;
+  let boxRect: L.Rectangle | null = null;
+  let resultLayer: L.LayerGroup | null = null;
+
   onMounted(() => {
-    // 初始化地图
-    // L.map(mapId) - 创建地图实例，参数是DOM元素的ID
-    // setView([lat, lng], zoom) - 设置地图中心点和缩放级别
-    // [lat, lng]是坐标数组，第一个是纬度，第二个是经度
-    map = L.map(mapId).setView(center, zoom);
-
-    // 添加瓦片图层（地图底图）
-    // 使用ESRI World Imagery作为底图，这是一个高质量的卫星影像服务
-    // URL模板：{z}表示缩放级别，{y}和{x}表示瓦片坐标
-    // 这些大写字母变量会被Leaflet自动替换为实际值
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      // attribution: 版权信息，显示在地图底部，用于说明数据来源
-      attribution: 'Tiles © Esri'
-    })
-    // 将图层添加到地图实例中
-    .addTo(map);
+    map.value = L.map(mapId).setView(center, zoom);
+    tileLayer = L.tileLayer(BASEMAPS[basemap.value].url, {
+      attribution: BASEMAPS[basemap.value].attribution,
+    }).addTo(map.value);
   });
 
-  // 返回地图实例，以便在需要时进行进一步操作
-  // 这样调用此函数的组件可以访问地图实例
-  return { map };
-}
+  /** 切换底图 */
+  function setBasemap(key: keyof typeof BASEMAPS) {
+    if (!map.value || !tileLayer) return;
+    basemap.value = key;
+    map.value.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(BASEMAPS[key].url, {
+      attribution: BASEMAPS[key].attribution,
+    }).addTo(map.value);
+    tileLayer.bringToBack();
+  }
 
-// 需要学习的关键知识点：
-// 
-// 1. Vue 3组合式API (Composition API):
-//    - onMounted: 组件生命周期钩子，在组件挂载后执行
-//    - 组合式函数: 将相关逻辑封装在一起的函数，便于复用
-// 
-// 2. Leaflet地图库:
-//    - L.map(): 创建地图实例
-//    - setView(): 设置地图中心点和缩放级别
-//    - L.tileLayer(): 添加瓦片图层（地图底图）
-//    - addTo(): 将图层添加到地图实例
-// 
-// 3. TypeScript类型注解:
-//    - [number, number]: 元组类型，表示包含两个数字的数组
-//    - L.Map | null: 联合类型，表示变量可以是L.Map或null
-// 
-// 4. 地图坐标系统:
-//    - [纬度, 经度]: Leaflet使用[纬度, 经度]顺序，不同于常见的[经度, 纬度]
-//    - 缩放级别: 数值越大表示缩放级别越高（地图越详细）
-// 
-// 5. 构建和资源路径:
-//    - 静态资源导入: 使用import导入图片等资源
-//    - 构建后路径问题: 构建工具会处理资源路径，需要显式导入
+  /** 切换选择模式 */
+  function setMode(m: 'point' | 'box') {
+    mode.value = m;
+    clearSelection();
+  }
+
+  /** 清除当前选区与结果 */
+  function clearSelection() {
+    if (boxRect && map.value) {
+      map.value.removeLayer(boxRect);
+      boxRect = null;
+    }
+  }
+
+  function clearResult() {
+    if (resultLayer && map.value) {
+      map.value.removeLayer(resultLayer);
+      resultLayer = null;
+    }
+  }
+
+  /** 绘制一个矩形选区，corners 为 [[lat,lng],[lat,lng]] */
+  function drawBox(corners: [[number, number], [number, number]]) {
+    if (!map.value || !corners) return;
+    clearSelection();
+    boxRect = L.rectangle(L.latLngBounds(corners[0], corners[1]), {
+      color: '#3da9f0',
+      weight: 2,
+      fillColor: '#3da9f0',
+      fillOpacity: 0.12,
+      dashArray: '6,4',
+    }).addTo(map.value);
+  }
+
+  /** 取当前选区 bbox=[minlon,minlat,maxlon,maxlat]；无选区返回 null */
+  function getBox(): [number, number, number, number] | null {
+    if (!boxRect || !map.value) return null;
+    const b = boxRect.getBounds();
+    return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  }
+
+  /** 在指定坐标放置标记 */
+  function placeMarker(lat: number, lon: number) {
+    if (!map.value) return;
+    clearSelection();
+    L.circleMarker([lat, lon], {
+      radius: 7,
+      color: '#ffd166',
+      weight: 2,
+      fillColor: '#ffd166',
+      fillOpacity: 0.85,
+    }).addTo(map.value);
+  }
+
+  /** 渲染 GeoJSON 建筑轮廓 */
+  function renderResult(geojson: any) {
+    if (!map.value) return;
+    clearResult();
+    resultLayer = L.geoJSON(geojson, {
+      style: {
+        color: '#3da9f0',
+        weight: 2,
+        fillColor: '#3da9f0',
+        fillOpacity: 0.25,
+      },
+      onEachFeature: (f, lyr) => {
+        const area = f?.properties?.area;
+        if (area != null) {
+          lyr.bindTooltip(`${area} m²`, { sticky: true });
+        }
+      },
+    }).addTo(map.value);
+  }
+
+  /** 跳转到坐标 */
+  function flyTo(lat: number, lon: number, z = 19) {
+    map.value?.flyTo([lat, lon], z, { duration: 0.8 });
+  }
+
+  return {
+    map,
+    basemap,
+    mode,
+    setBasemap,
+    setMode,
+    drawBox,
+    getBox,
+    placeMarker,
+    renderResult,
+    flyTo,
+    clearResult,
+    clearSelection,
+  };
+}

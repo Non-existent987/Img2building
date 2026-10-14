@@ -49,30 +49,43 @@ No manual digitizing, no paid API. The output drops into your existing GIS workf
 
 | Module | State |
 |---|---|
-| Map interaction & UI | In progress |
-| Model training & inference | In progress |
-| Backend API | In development |
-| Vector export | In development |
+| Map interaction & UI | Working |
+| Building detection | Working (EfficientNet-B4 Unet, 20.2M params) |
+| Backend API | Working (FastAPI) |
+| Shapefile export | Working |
+| Manual result editing | In development |
 
-Actively being rebuilt. Issues and feature requests welcome.
+Trained on a self-collected dataset (8,000+ annotated images). **Results require human verification.**
 
 ## Quick start
 
-### Frontend
-
-```bash
-cd frontend/vue_project
-npm install
-npm run dev      # dev server
-npm run build    # production build -> dist/
-```
-
-### Backend
+### Backend (required)
 
 ```bash
 cd backend
 pip install -r requirements.txt
+
+# place weights at frontend/model/Identification_model_file/ (see below)
+
 uvicorn main:app --reload
+# open http://127.0.0.1:8000
+```
+
+The server auto-serves the built frontend, so that URL is the full application.
+
+### Frontend (development)
+
+```bash
+cd frontend/vue_project
+npm install
+npm run dev
+```
+
+The frontend talks to the same-origin backend by default. For a separately hosted API:
+
+```bash
+# .env.local
+VITE_API_BASE=https://your-api-domain.com
 ```
 
 ### Model weights
@@ -81,16 +94,37 @@ uvicorn main:app --reload
 
 Mirror links will be added here once published (ModelScope / Hugging Face).
 
-Drop the file into `frontend/model/Identification_model_file/`.
+Drop the file into `frontend/model/Identification_model_file/`. The backend auto-detects it at startup.
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/health` | Health check, model status and device |
+| `POST /api/detect` | Detect by `bbox` (box) or `lon`/`lat` (point), returns GeoJSON |
+| `POST /api/export` | GeoJSON to Shapefile, returns zip |
+
+Example `/api/detect` request:
+
+```json
+{
+  "bbox": [114.285, 30.583, 114.290, 30.588],
+  "zoom": 19,
+  "pixel_size": 0.3
+}
+```
 
 ## Deployment
 
-The frontend is a static site. `npm run build` produces `dist/`, which any static host will serve:
+Frontend and backend ship together — `uvicorn main:app` gives you the whole application.
+
+Static-only hosting of `dist/` works for the UI but detection needs the backend:
 
 - **Cloudflare Pages** (recommended)
 - **Vercel** / **Netlify**
 - **EdgeOne Pages**
-- **GitHub Pages**
+
+Full inference deployment needs a GPU. Hourly-billed GPU hosts (AutoDL, Alibaba Cloud PAI) are the practical option.
 
 ## Contributing
 

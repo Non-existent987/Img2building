@@ -1,151 +1,263 @@
 <template>
-  <!-- 根元素，所有Vue组件都需要一个根元素 -->
-  <div id="app">
-    <!-- 容器元素，使用flexbox布局将页面分为左右两部分 -->
-    <div class="container">
-      <!-- 左侧面板，用于放置控制按钮和选项 -->
-      <div class="left-pane">
-        <div>
-          <!-- 标题：建筑物智能提取 -->
-          <h2>建筑物智能提取</h2>
-          <p>切换模式</p>
-          <!-- 模式切换按钮：点选模式 -->
-          <button>点选模式</button>
-          <!-- 模式切换按钮：框选模式 -->
-          <button>框选模式</button>
-          <p>切换底图</p>
-          <!-- 底图选择下拉菜单 -->
-          <select name="卫星图" id="">
-            <option value="">卫星图</option>
-            <option value="">街道图</option>
-          </select>
-          <p>选择模型</p>
-          <!-- 模型选择下拉菜单 -->
-          <select name="模型" id="">
-            <option value="">模型1</option>
-            <option value="">模型2</option>
-          </select>
-          <p>经度</p>
-          <!-- 经度输入框 -->
-          <input type="float"></input>
-          <p>纬度</p>
-          <!-- 纬度输入框 -->
-          <input type="float"></input>
-          <!-- 定位按钮 -->
-          <button>定位到经纬度</button>
-          <!-- 显示/隐藏图片按钮 -->
-          <button>显示/隐藏图片</button>
-          <!-- 清除识别按钮 -->
-          <button>清除识别</button>
-          <!-- 编辑建筑物按钮 -->
-          <button>编辑建筑物</button>
-          <!-- 添加标记点按钮 -->
-          <button>添加标记点</button>
-          <!-- 导出shp文件按钮 -->
-          <button>导出shp</button>
+  <div class="container">
+    <div class="left-pane">
+      <h2>建筑物智能提取</h2>
+
+      <div class="field">
+        <label>切换模式</label>
+        <div class="btn-group">
+          <button :class="{ active: mode === 'point' }" @click="setMode('point')">点选模式</button>
+          <button :class="{ active: mode === 'box' }" @click="setMode('box')">框选模式</button>
         </div>
       </div>
-      <!-- 右侧面板，用于显示地图 -->
-      <div class="right-pane">
-        <!-- 右侧内容标题 -->
-        <!-- <h2>右侧页面</h2> -->
-        <!-- 地图容器元素：这是Leaflet地图的容器，必须有唯一的id -->
-        <!-- id="map"：这是关键，useMap函数会使用这个ID来初始化地图 -->
-        <div id="map"></div>
+
+      <div class="field">
+        <label>切换底图</label>
+        <select v-model="basemapSel" @change="onBasemapChange">
+          <option value="satellite">卫星图</option>
+          <option value="street">街道图</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>经度</label>
+        <input v-model.number="lon" type="number" step="0.00001" />
+      </div>
+
+      <div class="field">
+        <label>纬度</label>
+        <input v-model.number="lat" type="number" step="0.00001" />
+      </div>
+
+      <button class="full" :disabled="busy" @click="locate">定位到经纬度</button>
+
+      <div class="divider"></div>
+
+      <button class="full primary" :disabled="busy || !canDetect" @click="detect">
+        {{ busy ? '识别中…' : '开始识别' }}
+      </button>
+
+      <div class="btn-group mt">
+        <button :disabled="!hasResult" @click="onClearResult">清除识别</button>
+        <button :disabled="busy || !hasResult" @click="exportShp">导出 shp</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="status">
+        <div v-if="status" :class="['msg', statusKind]">{{ status }}</div>
+        <div v-if="hasResult" class="result-info">
+          识别到 <b>{{ buildingCount }}</b> 栋建筑
+        </div>
+      </div>
+    </div>
+
+    <div class="right-pane">
+      <div id="map"></div>
+      <div v-if="mode === 'box' && !hasBox" class="map-hint">
+        在地图上按住左键拖动，框选要识别的区域
       </div>
     </div>
   </div>
 </template>
 
-<!-- Vue 3的组合式API语法，使用setup关键字 -->
 <script setup lang="ts">
-// 从Vue库导入onMounted生命周期钩子
-// onMounted: 在组件挂载到DOM后执行，此时可以安全地访问DOM元素
-// 这是关键：必须在DOM元素渲染后才能初始化地图
-
-// 导入自定义的组合式函数useMap
-// 组合式函数(Composable)是Vue 3中封装可复用逻辑的最佳实践
-// useMap函数封装了Leaflet地图初始化的逻辑，使代码更模块化
+import { computed, onMounted, ref } from 'vue';
 import { useMap } from './composables/useMap';
+import { detectApi, exportShpApi } from './api';
 
-// 调用useMap函数，传入地图容器的ID 'map'
-// 这会初始化Leaflet地图，并将其渲染到ID为'map'的div元素中
-// useMap函数内部使用onMounted钩子确保在DOM渲染后执行
-useMap('map');
+const {
+  map, mode, setMode, setBasemap, drawBox, getBox, placeMarker,
+  renderResult, flyTo, clearResult,
+} = useMap('map');
+
+const lon = ref(114.29);
+const lat = ref(30.5853);
+const basemapSel = ref<'satellite' | 'street'>('satellite');
+
+const busy = ref(false);
+const hasBox = ref(false);
+const lastGeojson = ref<any>(null);
+const status = ref('');
+const statusKind = ref<'info' | 'ok' | 'err'>('info');
+
+const buildingCount = computed(() => lastGeojson.value?.features?.length ?? 0);
+const hasResult = computed(() => buildingCount.value > 0);
+const canDetect = computed(() => (mode.value === 'box' ? hasBox.value : true));
+
+function onBasemapChange() {
+  setBasemap(basemapSel.value);
+}
+
+onMounted(() => {
+  const m = map.value;
+  if (!m) return;
+
+  let dragging = false;
+  let start: any = null;
+
+  m.on('mousedown', (e: any) => {
+    if (mode.value !== 'box') return;
+    dragging = true;
+    start = e.latlng;
+  });
+
+  m.on('mousemove', (e: any) => {
+    if (!dragging || !start) return;
+    drawBox([[start.lat, start.lng], [e.latlng.lat, e.latlng.lng]] as any);
+  });
+
+  m.on('mouseup', (e: any) => {
+    if (!dragging || !start) return;
+    dragging = false;
+
+    // 拖动距离过小视为误点击
+    const dh = Math.abs(e.latlng.lat - start.lat);
+    const dw = Math.abs(e.latlng.lng - start.lng);
+    if (dh < 1e-5 || dw < 1e-5) return;
+
+    hasBox.value = true;
+    status.value = '已框选区域，点击「开始识别」';
+    statusKind.value = 'info';
+  });
+});
+
+function locate() {
+  if (lon.value == null || lat.value == null) return;
+  flyTo(lat.value, lon.value, 19);
+  placeMarker(lat.value, lon.value);
+  status.value = `已定位到 ${lon.value}, ${lat.value}`;
+  statusKind.value = 'ok';
+}
+
+async function detect() {
+  busy.value = true;
+  status.value = '正在推理…';
+  statusKind.value = 'info';
+
+  try {
+    const payload: any = { zoom: 19 };
+    if (mode.value === 'box') {
+      const b = getBox();
+      if (!b) {
+        status.value = '请先框选区域';
+        statusKind.value = 'err';
+        return;
+      }
+      payload.bbox = b;
+    } else {
+      payload.lon = lon.value;
+      payload.lat = lat.value;
+    }
+
+    const res = await detectApi(payload);
+    lastGeojson.value = res.geojson;
+    renderResult(res.geojson);
+
+    const n = res.geojson.features.length;
+    status.value = n ? `识别完成，共 ${n} 栋` : '该区域未识别到建筑，可放大或换个区域';
+    statusKind.value = n ? 'ok' : 'info';
+  } catch (e: any) {
+    status.value = e?.message || '识别失败';
+    statusKind.value = 'err';
+  } finally {
+    busy.value = false;
+  }
+}
+
+function onClearResult() {
+  clearResult();
+  lastGeojson.value = null;
+  status.value = '';
+}
+
+async function exportShp() {
+  if (!lastGeojson.value) return;
+  busy.value = true;
+  try {
+    await exportShpApi(lastGeojson.value);
+    status.value = '已导出 buildings_shp.zip';
+    statusKind.value = 'ok';
+  } catch (e: any) {
+    status.value = e?.message || '导出失败';
+    statusKind.value = 'err';
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
 
 <style scoped>
-/* scoped: 表示这些CSS样式只应用于当前组件，不会影响其他组件 */
-/* 这有助于避免样式冲突 */
+#app { margin: 0; height: 100vh; }
 
-/* #app: 选择ID为app的元素 */
-#app {
-  /* font-family: 设置字体族，定义文本的字体 */
-  font-family: Avenir, Helvetica, Arial, sans-serif;
-  /* -webkit-font-smoothing: 抗锯齿，使字体在Webkit浏览器中更平滑 */
-  -webkit-font-smoothing: antialiased;
-  /* -moz-osx-font-smoothing: 使字体在Mac OS X的Firefox浏览器中更平滑 */
-  -moz-osx-font-smoothing: grayscale;
-  /* text-align: 设置文本对齐方式为居中 */
-  text-align: center;
-  /* color: 设置文本颜色 */
-  color: #2c3e50;
-  /* 移除最大宽度限制，让应用占满整个视口宽度 */
-  max-width: none;
-  margin: 0;
-  padding: 0;
-}
+.container { display: flex; height: 100vh; }
 
-/* .container: 选择class为container的元素 */
-.container {
-  /* display: flex: 使用弹性布局，使子元素可以灵活排列 */
-  display: flex;
-  /* height: 100vh: 设置高度为视口高度的100%，vh是viewport height的缩写 */
-  height: 100vh;
-  /* width: 100vw: 设置宽度为视口宽度的100%，避免内容限制在固定宽度内 */
-  /* 这里100vw和100%的区别是，100vw是视口宽度的100%，而100%是父容器宽度的100%。使用100vw可以确保容器占满整个视口宽度，避免内容被限制在固定宽度内。 */
-  width: 100vw;
-  /* 移除可能的内边距 */
-  padding: 0;
-  margin: 0;
-}
-
-/* .left-pane: 选择class为left-pane的元素（左侧面板） */
 .left-pane {
-  /* flex: 0 0 300px: 设置固定宽度为300px，不放大，不缩小 */
-  flex: 0 0 20%;
-  /* background-color: 设置背景色 */
-  background-color: #f0f0f0;
-  /* padding: 设置内边距，元素内容与边框之间的距离 */
-  padding: 20px;
-  /* overflow-y: auto: 当内容垂直方向溢出时显示滚动条 */
+  flex: 0 0 300px;
+  padding: 16px;
+  background: #fafbfc;
+  border-right: 1px solid #e3e6ea;
   overflow-y: auto;
-}
-
-/* .right-pane: 选择class为right-pane的元素（右侧面板） */
-.right-pane {
-  /* flex: 1: 占据剩余的所有空间 */
-  flex: 1;
-  /* background-color: 设置背景色 */
-  background-color: #ffffff;
-  /* display: flex: 使用弹性布局 */
   display: flex;
-  /* flex-direction: column: 设置弹性布局方向为垂直 */
   flex-direction: column;
-  /* align-items: center: 水平居中对齐子元素 */
-  align-items: stretch;
-  /* 移除可能的内边距 */
-  padding: 0;
-  margin: 0;
+  gap: 10px;
+}
+.left-pane h2 { margin: 0 0 4px; font-size: 17px; color: #1a2430; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 13px; color: #5a6672; }
+
+input, select {
+  padding: 7px 9px;
+  border: 1px solid #ccd3da;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+input:focus, select:focus { outline: none; border-color: #3da9f0; }
+
+button {
+  padding: 8px 12px;
+  border: 1px solid #ccd3da;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+button:hover:not(:disabled) { background: #f0f4f8; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.active { background: #3da9f0; border-color: #3da9f0; color: #fff; }
+button.full { width: 100%; }
+button.primary { background: #1a7fd4; border-color: #1a7fd4; color: #fff; font-weight: 500; }
+button.primary:hover:not(:disabled) { background: #1668b4; }
+
+.btn-group { display: flex; gap: 8px; }
+.btn-group button { flex: 1; }
+.mt { margin-top: 8px; }
+.divider { height: 1px; background: #e3e6ea; margin: 4px 0; }
+
+.right-pane { flex: 1; position: relative; }
+#map { width: 100%; height: 100%; z-index: 1; }
+
+.map-hint {
+  position: absolute;
+  top: 16px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(26,36,48,.88);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 1000;
 }
 
-/* #map: 选择ID为map的元素（地图容器） */
-#map {
-  /* width: 100%: 宽度占满父容器 */
-  width: 100%;
-  /* height: 100%: 高度占满父容器 */
-  height: 100%;
-  /* z-index: 设置元素的堆叠顺序，数值越大越靠前 */
-  z-index: 1;
-}
+.status { font-size: 12.5px; line-height: 1.6; }
+.msg.info { color: #5a6672; }
+.msg.ok { color: #17803d; }
+.msg.err { color: #c0392b; }
+.result-info { color: #1a2430; margin-top: 4px; }
 </style>

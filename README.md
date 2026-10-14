@@ -49,16 +49,31 @@
 
 | 模块 | 状态 |
 |---|---|
-| 地图交互与界面 | 进行中 |
-| 模型训练与推理 | 进行中 |
-| 后端 API 服务 | 开发中 |
-| 矢量导出 | 开发中 |
+| 地图交互与界面 | 可用 |
+| 建筑物识别推理 | 可用（EfficientNet-B4 Unet，20.2M 参数） |
+| 后端 API 服务 | 可用（FastAPI） |
+| Shapefile 导出 | 可用 |
+| 结果人工编辑 | 开发中 |
 
-项目正在重写中，功能逐步上线。欢迎提 Issue 提需求。
+模型权重自建数据集训练（8000+ 张标注影像）。识别结果**需人工校验**。
 
 ## 快速开始
 
-### 前端
+### 后端（必需）
+
+```bash
+cd backend
+pip install -r requirements.txt
+
+# 把权重放到 frontend/model/Identification_model_file/（见下节）
+
+uvicorn main:app --reload
+# 打开 http://127.0.0.1:8000
+```
+
+服务启动后会自动托管已构建的前端，`http://127.0.0.1:8000` 即为完整应用。
+
+### 前端（开发时）
 
 ```bash
 cd frontend/vue_project
@@ -69,16 +84,14 @@ nvm install 18.17.0
 nvm use 18.17.0
 
 npm install
-npm run dev      # 开发模式
-npm run build    # 生产构建，产物在 dist/
+npm run dev
 ```
 
-### 后端
+前端默认连同源后端。后端独立部署时，用环境变量指定地址：
 
 ```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
+# .env.local
+VITE_API_BASE=https://your-api-domain.com
 ```
 
 ### 获取模型
@@ -87,16 +100,37 @@ uvicorn main:app --reload
 
 模型托管地址发布后会在此更新（ModelScope / Hugging Face）。
 
-获取后放入 `frontend/model/Identification_model_file/` 目录。
+获取后放入 `frontend/model/Identification_model_file/` 目录。后端启动时会自动检测该路径。
+
+## API
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/health` | 健康检查，返回模型加载状态与运行设备 |
+| `POST /api/detect` | 按 `bbox`（框选）或 `lon`/`lat`（点选）识别，返回 GeoJSON |
+| `POST /api/export` | GeoJSON 转 Shapefile，返回 zip |
+
+`/api/detect` 请求示例：
+
+```json
+{
+  "bbox": [114.285, 30.583, 114.290, 30.588],
+  "zoom": 19,
+  "pixel_size": 0.3
+}
+```
 
 ## 部署说明
 
-前端为纯静态站点，`npm run build` 产出的 `dist/` 可直接托管在任意静态平台：
+前后端一体，`uvicorn main:app` 启动后即为完整应用。
+
+纯前端托管（不含推理）时，`npm run build` 产出的 `dist/` 可托管到任意静态平台，但识别功能需要后端配合：
 
 - **Cloudflare Pages**（推荐，免备案，国内访问优于 GitHub）
 - **Vercel** / **Netlify**（绑定仓库自动构建）
 - **EdgeOne Pages**（腾讯云，国内节点）
-- **GitHub Pages**
+
+含推理的完整部署需要 GPU 环境，建议用 AutoDL / 阿里云 PAI 等按小时计费的 GPU 平台。
 
 ## 参与贡献
 
